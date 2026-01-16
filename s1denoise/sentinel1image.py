@@ -39,8 +39,9 @@ ANTENNA_STEERING_RATE = { 'IW1': 1.590368784,
                           'EW5': 2.122855427 }    # degrees per second. Available from AUX_INS
 
 class Sentinel1ImageXml:
-    def __init__(self, s1):
+    def __init__(self, s1, **kwargs):
         ''' Read calibration/annotation XML files and auxiliary XML file '''        
+        self.ssl_verify = kwargs.pop('ssl_verify',True)
         self.txPol = s1.filename.split(os.sep)[-1][15]    # H or V
         self.platform = s1.filename.split(os.sep)[-1][:3]    # S1A or S1B
         manifest_file = [f for f in s1.filenames if 'manifest.safe' in f][0]
@@ -94,20 +95,20 @@ class Sentinel1ImageXml:
         validity_start = f'{vs[:4]}-{vs[4:6]}-{vs[6:8]}T{vs[9:11]}:{vs[11:13]}:{vs[13:15]}'
         cd = filename.split('_')[4].lstrip('G')
         creation_date = f'{cd[:4]}-{cd[4:6]}-{cd[6:8]}T{cd[9:11]}:{cd[11:13]}:{cd[13:15]}'
-        def get_remote_url(api_url):
-            with requests.get(api_url, stream=True) as r:
+        def get_remote_url(api_url,ssl_verify:bool=False):
+            with requests.get(api_url, stream=True, verify=ssl_verify) as r:
                 rjson = json.loads(r.content.decode())
                 remote_url = rjson['results'][0]['remote_url']
                 physical_name = rjson['results'][0]['physical_name']
                 return remote_url, physical_name
         try:
-            remote_url, physical_name = get_remote_url(f'https://sar-mpc.eu/api/v1/?product_type=AUX_CAL&validity_start={validity_start}&creation_date={creation_date}')
+            remote_url, physical_name = get_remote_url(f'https://sar-mpc.eu/api/v1/?product_type=AUX_CAL&validity_start={validity_start}&creation_date={creation_date}',ssl_verify=self.ssl_verify)
         except:
-            remote_url, physical_name = get_remote_url(f'https://sar-mpc.eu/api/v1/?product_type=AUX_CAL&validity_start={validity_start}')
+            remote_url, physical_name = get_remote_url(f'https://sar-mpc.eu/api/v1/?product_type=AUX_CAL&validity_start={validity_start}',ssl_verify=self.ssl_verify)
 
         download_file = os.path.join(self.aux_data_dir, physical_name)
         print(f'downloading {filename}.zip from {remote_url}')
-        with requests.get(remote_url, stream=True) as r:
+        with requests.get(remote_url, stream=True, verify=self.ssl_verify) as r:
             with open(download_file, "wb") as f:
                 f.write(r.content)
 
@@ -133,7 +134,11 @@ class Sentinel1Image():
     s1 : Sentinel1Image
         Object to perform noise correction
     """
-    def __init__(self, filename):
+    def __init__(self, filename, **kwargs):
+
+        # Get options from kwargs                    
+        self.ssl_verify=kwargs.pop('ssl_verify',True)
+
         self.filename = filename
         self.find_filesnames()
         # get list of measurements
@@ -155,7 +160,7 @@ class Sentinel1Image():
         # scene center time will be used as the reference for relative azimuth time in seconds
         self.time_coverage_center = ( self.time_coverage_start + timedelta(
             seconds=(self.time_coverage_end - self.time_coverage_start).total_seconds()/2) )
-        self.xml = Sentinel1ImageXml(self)
+        self.xml = Sentinel1ImageXml(self, ssl_verify=self.ssl_verify)
         # get processor version of Sentinel-1 IPF (Instrument Processing Facility)
         self.IPFversion = float(self.xml.manifest.find('safe:software').attrs['version'])
         if self.IPFversion < 2.43:
